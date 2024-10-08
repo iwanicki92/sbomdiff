@@ -102,20 +102,20 @@ def main(argv=None):
 
     if args["sbom"] == "spdx":
         file1_type = file2_type = "SPDX"
-        packages1 = spdx.parse(args["FILE1"])
-        packages2 = spdx.parse(args["FILE2"])
+        packages1, files1 = spdx.parse(args["FILE1"])
+        packages2, files2 = spdx.parse(args["FILE2"])
     elif args["sbom"] == "cyclonedx":
         file1_type = file2_type = "CYCLONEDX"
         packages1 = cyclonedx.parse(args["FILE1"])
         packages2 = cyclonedx.parse(args["FILE2"])
     else:
         # Work out the SBOM type for each file
-        packages1 = spdx.parse(args["FILE1"])
+        packages1, files1 = spdx.parse(args["FILE1"])
         file1_type = "SPDX"
         if len(packages1) == 0:
             packages1 = cyclonedx.parse(args["FILE1"])
             file1_type = "CYCLONEDX"
-        packages2 = spdx.parse(args["FILE2"])
+        packages2, files2 = spdx.parse(args["FILE2"])
         file2_type = "SPDX"
         if len(packages2) == 0:
             file2_type = "CYCLONEDX"
@@ -128,9 +128,11 @@ def main(argv=None):
         print("SBOM File1", args["FILE1"])
         print("SBOM File1 - type", file1_type)
         print("SBOM File1 - packages", len(packages1))
+        print("SBOM File1 - files", len(files1))
         print("SBOM File2", args["FILE2"])
         print("SBOM File2 - type", file2_type)
         print("SBOM File2 - packages", len(packages2))
+        print("SBOM File2 - files", len(files2))
         print("Exclude Licences", args["exclude_license"])
 
     # Keep count of differences
@@ -138,6 +140,9 @@ def main(argv=None):
     new_packages = 0
     removed_packages = 0
     license_changes = 0
+    new_files = 0
+    removed_files = 0
+    changed_files = 0
 
     sbom_out = SBOMOutput(args["output_file"], args["format"])
 
@@ -222,6 +227,35 @@ def main(argv=None):
                 ] = license_info  # HPE - Adding license_info to package_info
                 diff_doc.append(package_info)
             new_packages += 1
+    for file in files1:
+        if file in files2:
+            file_info = {"file": file}
+            if files1[file] != files2[file]:
+                if args["format"] == "text":
+                    sbom_out.send_output(
+                        f"[CHANGED] {file}"
+                    )
+                changed_files += 1
+                file_info["status"] = "change"
+        else:
+            if args["format"] == "text":
+                sbom_out.send_output(
+                    f"[REMOVED] {file}"
+                )
+            removed_files += 1
+            file_info["status"] = "remove"
+        if args["format"] != "text" and "status" in file_info:
+            diff_doc.append(file_info)
+    for file in files2:
+        if file not in files1:
+            if args["format"] == "text":
+                sbom_out.send_output(
+                    f"[ADDED  ] {file}"
+                )
+            new_files += 1
+            if args["format"] != "text":
+                diff_doc.append({"file": file, "status": "add"})
+
     if args["format"] == "text":
         sbom_out.send_output("\nSummary\n-------")
         sbom_out.send_output(f"Version changes:  {version_changes}")
@@ -229,6 +263,9 @@ def main(argv=None):
             sbom_out.send_output(f"License changes:  {license_changes}")
         sbom_out.send_output(f"Removed packages: {removed_packages}")
         sbom_out.send_output(f"New packages:     {new_packages}")
+        sbom_out.send_output(f"Changed files:    {changed_files}")
+        sbom_out.send_output(f"Removed files:    {removed_files}")
+        sbom_out.send_output(f"New files:        {new_files}")
 
     if args["format"] != "text":
         json_doc = {}
@@ -243,13 +280,17 @@ def main(argv=None):
         summary["version_changes"] = version_changes
         summary["new_packages"] = new_packages
         summary["removed_packages"] = removed_packages
+        summary["changed_files"] = changed_files
+        summary["new_files"] = new_files
+        summary["removed_files"] = removed_files
         if not args["exclude_license"]:
             summary["license_changes"] = license_changes
         json_doc["summary"] = summary
         sbom_out.generate_output(json_doc)
 
     # Return code indicates if any differences have been detected
-    if (version_changes or license_changes or removed_packages or new_packages) != 0:
+    if (version_changes or license_changes or removed_packages or
+        new_packages or changed_files or new_files or removed_files) != 0:
         return 1
 
     return 0

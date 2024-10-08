@@ -53,6 +53,7 @@ class SPDXParser:
         """parses SPDX JSON BOM file extracting package name, version and license"""
         data = json.load(open(sbom_file))
         packages = {}
+        files = {}
         # Check that valid SPDX JSON file is being processed
         if "packages" in data:
             for d in data["packages"]:
@@ -64,8 +65,12 @@ class SPDXParser:
                         packages[package] = [version, license]
                 except KeyError:
                     pass
+        
+        if "files" in data:
+            for file in data["files"]:
+                files[file["fileName"]] = file["checksums"]
 
-        return packages
+        return packages, files
 
     def parse_spdx_rdf(self, sbom_file):
         """parses SPDX RDF BOM file extracting package name, version and license"""
